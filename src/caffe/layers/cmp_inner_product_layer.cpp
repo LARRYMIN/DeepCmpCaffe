@@ -12,6 +12,8 @@ namespace caffe {
 template <typename Dtype>
 void CmpInnerProductLayer<Dtype>::ComputeBlobMask()
 {
+
+  cout<<endl<<endl<<"into ComputeBlobMask    "<<this->layer_param().name()<<endl;
   //  LOG(INFO) << "inner blobmask"<<endl;
   int count = this->blobs()[0]->count();
   //this->masks_.resize(count);

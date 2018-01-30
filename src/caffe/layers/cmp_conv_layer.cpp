@@ -9,6 +9,10 @@ namespace caffe {
 template <typename Dtype>
 void CmpConvolutionLayer<Dtype>::ComputeBlobMask()
 {
+
+  
+
+  cout<<endl<<endl<<"into ComputeBlobMask    "<<this->layer_param().name()<<endl;
   //  LOG(INFO)<<"conv blob mask"<<endl;
   int count = this->blobs_[0]->count();
   //this->masks_.resize(count);
@@ -27,7 +31,11 @@ void CmpConvolutionLayer<Dtype>::ComputeBlobMask()
   {
     //this->masks_[i] = 1; //initialize
      sort_weight[i] = fabs(weight[i]);
+     if(i<50)
+     cout<<weight[i]<<"  ";
   }
+
+  //cout<<endl;
 
   sort(sort_weight.begin(), sort_weight.end());
   
@@ -46,11 +54,13 @@ void CmpConvolutionLayer<Dtype>::ComputeBlobMask()
     thr= sort_weight[index-1];
     LOG(INFO) << "CONV THR: " <<thr << " " <<ratio <<endl;
 
-
+    cout<<endl<<"------------------1---------------------"<<endl;
     for (int i = 0; i < count; ++i)
     {
-	mask_data[i] = ((weight[i] > thr || weight[i] < -thr) ? 1 : 0) ;
+	    mask_data[i] = ((weight[i] > thr || weight[i] < -thr) ? 1 : 0) ;
         muweight[i] *= mask_data[i];
+        if(i<50)
+        cout<<mask_data[i]<<"  ";
         rat += (1-mask_data[i]) ;
      }
    

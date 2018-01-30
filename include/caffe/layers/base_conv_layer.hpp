@@ -27,6 +27,13 @@ class BaseConvolutionLayer : public Layer<Dtype> {
   virtual inline int MinBottomBlobs() const { return 1; }
   virtual inline int MinTopBlobs() const { return 1; }
   virtual inline bool EqualNumBottomTopBlobs() const { return true; }
+  virtual int class_num();
+
+  int class_num1(){
+	return class_num_;
+  }
+
+
 
  protected:
   // Helper functions that abstract away the column buffer and gemm arguments.
@@ -182,6 +189,16 @@ class BaseConvolutionLayer : public Layer<Dtype> {
 
   Blob<Dtype> col_buffer_;
   Blob<Dtype> bias_multiplier_;
+
+
+   
+
+
+
+
+
+
+
 };
 
 }  // namespace caffe

@@ -96,6 +96,19 @@ class Layer {
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {}
 
+
+
+  
+
+  //virtual int class_num(){return 0;}
+
+
+
+
+
+
+
+
   /**
    * @brief Whether a layer should be shared by multiple nets during data
    *        parallelism. By default, all layers except for data layers should
@@ -186,6 +199,22 @@ class Layer {
   vector<shared_ptr<Blob<Dtype> > >& blobs() {
     return blobs_;
   }
+
+
+  Blob<int>& masks() {
+    return masks_;
+  }
+
+  Blob<int>& indices() {
+    return indices_;
+  }
+
+  Blob<Dtype>& centroids() {
+    return centroids_;
+  }
+
+
+
 
   /**
    * @brief Returns the layer parameter.

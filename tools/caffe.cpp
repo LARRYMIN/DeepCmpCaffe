@@ -11,9 +11,30 @@ namespace bp = boost::python;
 #include <string>
 #include <vector>
 
+#include <stdio.h>
+#include <string.h>
+#include <fstream>
+#include <iostream>
+
 #include "boost/algorithm/string.hpp"
+#include "boost/shared_ptr.hpp"
+
+
 #include "caffe/caffe.hpp"
 #include "caffe/util/signal_handler.h"
+
+#include "caffe/proto/caffe.pb.h"
+#include "caffe/layers/cmp_conv_layer.hpp"
+#include "caffe/layers/cmp_inner_product_layer.hpp"
+
+
+#define PLOG 0
+
+
+using namespace std;
+using namespace caffe;
+
+
 
 using caffe::Blob;
 using caffe::Caffe;
@@ -39,7 +60,11 @@ DEFINE_string(snapshot, "",
 DEFINE_string(weights, "",
     "Optional; the pretrained weights to initialize finetuning, "
     "separated by ','. Cannot be set simultaneously with snapshot.");
-DEFINE_int32(iterations, 50,
+DEFINE_string(cm, "",
+    "The compressed weights file, "
+    "separated by ','. Cannot be set simultaneously with snapshot.");
+
+DEFINE_int32(iterations, 20,
     "The number of iterations to run.");
 DEFINE_string(sigint_effect, "stop",
              "Optional; action to take when a SIGINT signal is received: "
@@ -249,6 +274,9 @@ int test() {
   // Instantiate the caffe net.
   Net<float> caffe_net(FLAGS_model, caffe::TEST);
   caffe_net.CopyTrainedLayersFrom(FLAGS_weights);
+
+
+
   LOG(INFO) << "Running for " << FLAGS_iterations << " iterations.";
 
   vector<int> test_score_output_id;
@@ -295,6 +323,771 @@ int test() {
   return 0;
 }
 RegisterBrewFunction(test);
+
+
+
+
+
+
+// Test: score a model.
+int test1() {
+  CHECK_GT(FLAGS_model.size(), 0) << "Need a model definition to score.";
+  CHECK_GT(FLAGS_weights.size(), 0) << "Need model weights to score.";
+
+  // Set device id and mode
+  vector<int> gpus;
+  get_gpus(&gpus);
+  if (gpus.size() != 0) {
+    LOG(INFO) << "Use GPU with device ID " << gpus[0];
+#ifndef CPU_ONLY
+    cudaDeviceProp device_prop;
+    cudaGetDeviceProperties(&device_prop, gpus[0]);
+    LOG(INFO) << "GPU device name: " << device_prop.name;
+#endif
+    Caffe::SetDevice(gpus[0]);
+    Caffe::set_mode(Caffe::GPU);
+  } else {
+    LOG(INFO) << "Use CPU.";
+    Caffe::set_mode(Caffe::CPU);
+  }
+  // Instantiate the caffe net.
+  Net<float> caffe_net(FLAGS_model, caffe::TEST);
+  caffe_net.CopyTrainedLayersFrom(FLAGS_weights);
+
+
+
+
+
+  const vector<shared_ptr<Layer<float> > >&  lays = caffe_net.layers();
+
+
+ // Layer<float> l0 = lays[0];
+
+cout<<"000000"<<endl;
+
+   lays[0]->ComputeBlobMask();
+  
+cout<<"000000wwwwww"<<endl;
+  vector<shared_ptr<Blob<float> > >& blob = lays[0]->blobs();
+
+cout<<"11111"<<endl;
+
+   //const float* weight ;
+   const float* weight = (blob[0])->cpu_data();
+
+cout<<"11111aaaaa"<<endl;
+   
+     int count = blob[0]->count();
+
+cout<<"2222"<<endl;
+
+     for (int i = 0; i < count; ++i)
+  {
+     //sort_weight[i] = fabs(weight[i]);
+     cout<<weight[i]<<"  ";
+  }
+
+
+
+
+
+  LOG(INFO) << "Running for " << FLAGS_iterations << " iterations.";
+
+  vector<int> test_score_output_id;
+  vector<float> test_score;
+  float loss = 0;
+  for (int i = 0; i < FLAGS_iterations; ++i) {
+    float iter_loss;
+    const vector<Blob<float>*>& result =
+        caffe_net.Forward(&iter_loss);
+    loss += iter_loss;
+    int idx = 0;
+    for (int j = 0; j < result.size(); ++j) {
+      const float* result_vec = result[j]->cpu_data();
+      for (int k = 0; k < result[j]->count(); ++k, ++idx) {
+        const float score = result_vec[k];
+        if (i == 0) {
+          test_score.push_back(score);
+          test_score_output_id.push_back(j);
+        } else {
+          test_score[idx] += score;
+        }
+        const std::string& output_name = caffe_net.blob_names()[
+            caffe_net.output_blob_indices()[j]];
+        LOG(INFO) << "Batch " << i << ", " << output_name << " = " << score;
+      }
+    }
+  }
+  loss /= FLAGS_iterations;
+  LOG(INFO) << "Loss: " << loss;
+  for (int i = 0; i < test_score.size(); ++i) {
+    const std::string& output_name = caffe_net.blob_names()[
+        caffe_net.output_blob_indices()[test_score_output_id[i]]];
+    const float loss_weight = caffe_net.blob_loss_weights()[
+        caffe_net.output_blob_indices()[test_score_output_id[i]]];
+    std::ostringstream loss_msg_stream;
+    const float mean_score = test_score[i] / FLAGS_iterations;
+    if (loss_weight) {
+      loss_msg_stream << " (* " << loss_weight
+                      << " = " << loss_weight * mean_score << " loss)";
+    }
+    LOG(INFO) << output_name << " = " << mean_score << loss_msg_stream.str();
+  }
+
+  return 0;
+}
+RegisterBrewFunction(test1);
+
+
+
+
+
+
+
+
+// compress
+int compress() {
+
+    
+
+    LOG(INFO) << "Use CPU.";
+    Caffe::set_mode(Caffe::CPU);
+
+    caffe::NetParameter msg; 
+    cout<<"FLAGS_weights   "<<FLAGS_weights<<endl;
+
+    std::fstream input(FLAGS_weights.c_str(), ios::in | ios::binary); 
+     if (!msg.ParseFromIstream(&input))       // function ParseFromIstream  is in  ::google::protobuf::Message
+      { 
+        cerr << "Failed to parse address book." << endl; 
+       return -1; 
+     } 
+   //printf("length = %d\n", length);
+   printf("Repeated Size = %d\n", msg.layer_size());
+ 
+   ::google::protobuf::RepeatedPtrField< LayerParameter >* layer = msg.mutable_layer();
+
+
+   cout<<msg.input_shape_size()<<endl ;
+   cout<<"ff000000"<<endl;
+
+   Net<float> caffe_net(FLAGS_model, caffe::TEST);
+   caffe_net.CopyTrainedLayersFrom(msg);
+
+   
+    cout<<"FLAGS_cm   "<<FLAGS_cm<<endl;
+    std::ofstream fout(FLAGS_cm.c_str(), std::ios::binary);
+    int write_bytes=0;
+
+
+
+   //Net<float> caffe_net();
+   //caffe_net.CopyTrainedLayersFrom(msg);
+
+
+   const vector<shared_ptr<Layer<float> > >&  lays = caffe_net.layers();
+  
+
+ // Layer<float> l0 = lays[0];
+
+   //cout<<"000000"<<endl;
+   cout<<"lays size  = "<<lays.size()<<endl;
+
+
+   for(int i=0;i<lays.size();i++){
+
+     cout<<endl<<"---------------------------------------------------"<<endl;
+
+    vector<shared_ptr<Blob<float> > >& blob = lays[i]->blobs();
+
+    //cout<<i<<"  "<<"blob size  = "<<blob.size()<<endl;
+
+
+    if(blob.size()>0){
+           cout << lays[i]->layer_param().name() << endl;
+           cout << lays[i]->layer_param().type() << endl;
+
+		   vector<shared_ptr<Blob<float> > >& blob = lays[i]->blobs();
+
+           //Blob<int>& masks  = lays[i]->masks();
+           const int *mask_data = lays[i]->masks().cpu_data();
+
+
+		   //cout<<"11111"<<endl;
+
+		   cout<<"blob size  = "<<blob.size()<<endl;
+
+
+		   int count = blob[0]->count();
+
+		   cout<<i<<"   "<<"count = "<<count<<endl;
+
+
+
+		   //const float* weight ;
+		   const float* weight = blob[0]->cpu_data();
+
+           float* muweight = blob[0]->mutable_cpu_data();
+
+
+
+
+
+		   const float* bias = blob[1]->cpu_data();
+
+ 		    	int countb = blob[1]->count();
+			cout<<i<<"   "<<"countb = "<<countb<<endl;
+
+
+
+		  // cout<<"11111aaaaa"<<endl;
+           const float *cent_data = lays[i]->centroids().cpu_data();
+           const int *indice_data = lays[i]->indices().cpu_data();
+
+
+             
+
+
+           if (strcmp(lays[i]->layer_param().type().c_str(), "CmpConvolution") == 0){
+
+               const  shared_ptr<Layer<float> > l = lays[i];
+               const  shared_ptr<BaseConvolutionLayer<float> > bcl=  boost::dynamic_pointer_cast<BaseConvolutionLayer<float> >(l) ;
+
+               int class_num = bcl->class_num();
+
+               cout<<"class_num  "<<class_num<<"  ";
+
+
+
+	            for(int k=0;k<class_num;k++){
+                   
+			        //cout<<cent_data[k]<<"   ";
+			        fout.write((char*)(cent_data+k), sizeof(float));
+                    write_bytes+=sizeof(float);
+		        }
+
+
+           }
+
+          if (strcmp(lays[i]->layer_param().type().c_str(), "CmpInnerProduct") == 0){
+
+               const  shared_ptr<Layer<float> > l = lays[i];
+               const  shared_ptr<CmpInnerProductLayer<float> > bcl=  boost::dynamic_pointer_cast<CmpInnerProductLayer<float> >(l) ;
+
+               int class_num = bcl->class_num();
+
+               cout<<"class_num  "<<class_num<<"  ";
+
+
+
+	            for(int k=0;k<class_num;k++){
+                   
+			        //cout<<cent_data[k]<<"   ";
+			        fout.write((char*)(cent_data+k), sizeof(float));
+                    write_bytes+=sizeof(float);                
+		        }
+
+
+           }
+
+
+          int count_one=0;
+          for (int i = 0; i < count; ++i)
+		  {
+
+		        //sort_weight[i] = fabs(weight[i]);
+		        //cout<<weight[i]<<"  ";
+		        //cout<<mask_data[i]<<"  ";
+		        //cout<<indice_data<<"  ";
+                //unsigned char indice=(unsigned char)(indice_data[i]);
+                //printf("%u  ",indice);
+
+			    if(mask_data[i]){
+                    count_one++;
+
+
+			    }
+
+
+		  }
+
+          // write the number of mask = 1
+      		fout.write((char*)(&count_one), sizeof(int));	
+            write_bytes+=sizeof(int);	
+ cout<<endl<<"--------------------------------count_one    "<<count_one<<"/"<<count<<"---------------------------------------"<<endl;
+                   
+
+		  for (int i = 0; i < count; ++i)
+		  {
+		        //sort_weight[i] = fabs(weight[i]);
+		        //cout<<weight[i]<<"  ";
+		        //cout<<mask_data[i]<<"  ";
+		        //cout<<indice_data<<"  ";
+                unsigned char indice=(unsigned char)(indice_data[i]);
+                //printf("%u  ",indice);
+
+			    if(mask_data[i]){
+	          		fout.write((char*)(&i), sizeof(int));	
+                    fout.write((char*)(&indice), sizeof(char));
+                    write_bytes+=sizeof(int)+sizeof(char);	
+                    if(i<100)
+                    cout<<"["<<i<<",  "<<+indice<<"]   ";
+			    }
+
+
+		  }
+
+	  	  for (int i = 0; i < countb; ++i)
+		  {
+		     //sort_weight[i] = fabs(weight[i]);
+		     //cout<<weight[i]<<"  ";
+			 //cout<<bias[i]<<"  ";
+		     //cout<<mask_data[i]<<"  ";
+		     //cout<<indice_data<<"  ";
+             fout.write((char*)(bias+i), sizeof(float));	
+             write_bytes+=sizeof(float);  
+
+		  }
+
+
+          for (int j = 0; j < count; ++j)
+		  {
+		     //cout<<indice_data[j]<<"  ";
+             //printf("%cu  ",indice_data[j]);
+             //cout<<"["<<weight[j]<<",  "<<muweight[j]<<"]   ";
+             if(j==100)break;
+
+		  }
+
+    }
+
+
+   }
+  
+  
+    fout.close();
+
+    cout<<"-----------------writed bytes   "<<write_bytes<<"----------------------------"<<endl;
+
+
+   //CopyTrainedLayersFrom(msg);
+
+
+   ::google::protobuf::RepeatedPtrField< LayerParameter >::iterator it = layer->begin();
+   for (; it != layer->end(); ++it)
+   {
+     cout << it->name() << endl;
+     cout << it->type() << endl;
+     cout << it->convolution_param().weight_filler().max() << endl;
+     //cout << it->convolution_param().weight_filler().value() << endl;
+
+/*
+
+     cout<<"55555000000wwwwww"<<endl;
+     vector<shared_ptr<Blob<float> > >& blob = (*it)->blobs();
+
+      int count = blob[0]->count();
+
+     cout<<"count2 = "<<count<<endl;
+
+
+     const float* weight = blob[0]->cpu_data();
+     
+
+
+     for (int i = 0; i < count; ++i)
+     {
+      //sort_weight[i] = fabs(weight[i]);
+      cout<<weight[i]<<"  ";
+     }
+
+*/
+    cout <<"layer.blobs_size()  "<< it->blobs_size()<<endl;
+
+
+  //sparse parameters
+  float sparse_ratio_;
+  int class_num_;
+  bool quantize_term_;
+
+    sparse_ratio_ = it->convolution_param().sparse_ratio();
+    class_num_ = it->convolution_param().class_num();
+    quantize_term_ = it->convolution_param().quantize_term();
+
+
+    cout<<"sparse_ratio_ "<<sparse_ratio_ <<endl;
+    cout<<"class_num_ "<< class_num_ <<endl;
+    cout<<"quantize_term_ "<<quantize_term_ <<endl;
+
+/*
+
+	 int count = ((CmpConvolutionLayer<float>)it)->blobs_[0]->count();
+
+	 const Dtype* weight = it->blobs_[0]->cpu_data();
+	  //Dtype min_weight = weight[0] , max_weight = weight[0];
+	  vector<Dtype> sort_weight(count);
+		       
+	  for (int i = 0; i < count; ++i)
+	  {
+	    //this->masks_[i] = 1; //initialize
+	     sort_weight[i] = fabs(weight[i]);
+	     cout<<weight[i]<<"  ";
+	  }
+
+	  cout<<endl;
+
+
+*/
+
+
+   } 
+
+  return 0;
+
+
+}
+
+
+RegisterBrewFunction(compress);
+
+
+
+
+
+
+
+//de compress
+int decmp() {
+
+    
+
+    LOG(INFO) << "Use CPU.";
+    Caffe::set_mode(Caffe::CPU);
+
+    caffe::NetParameter msg; 
+
+
+/*
+     cout<<"FLAGS_weights   "<<FLAGS_weights<<endl;
+
+     std::fstream input(FLAGS_weights.c_str(), ios::in | ios::binary); 
+     if (!msg.ParseFromIstream(&input))       // function ParseFromIstream  is in  ::google::protobuf::Message
+      { 
+        cerr << "Failed to parse address book." << endl; 
+       return -1; 
+     } 
+     //printf("length = %d\n", length);
+     printf("Repeated Size = %d\n", msg.layer_size());
+ 
+    ::google::protobuf::RepeatedPtrField< LayerParameter >* layer = msg.mutable_layer();
+
+
+     cout<<msg.input_shape_size()<<endl ;
+*/
+
+
+
+     Net<float> caffe_net(FLAGS_model, caffe::TEST);
+     //caffe_net.CopyTrainedLayersFrom(msg);
+     int read_bytes=0;
+   
+    
+     //std::ofstream fout("examples/mnist/compress/lenet.cm", std::ios::binary);
+
+     cout<<"FLAGS_cm   "<<FLAGS_cm<<endl;
+     std::ifstream fin(FLAGS_cm.c_str(), std::ios::binary);
+     const vector<shared_ptr<Layer<float> > >&  lays = caffe_net.layers();
+
+
+     cout<<"lays size  = "<<lays.size()<<endl;
+
+
+     for(int i=0;i<lays.size();i++){
+
+        cout<<endl<<"---------------------------------------------------"<<endl;
+
+        vector<shared_ptr<Blob<float> > >& blob = lays[i]->blobs();
+
+        cout<<i<<"  "<<"blob size  = "<<blob.size()<<endl;
+
+
+        if(blob.size()>0){
+
+
+		       vector<shared_ptr<Blob<float> > >& blob = lays[i]->blobs();
+
+               //Blob<int>& masks  = lays[i]->masks();
+               int *mask_data = lays[i]->masks().mutable_cpu_data();
+
+
+               int count = blob[0]->count();
+
+		       cout<<i<<"   "<<"count = "<<count<<endl;
+
+
+
+		       //const float* weight ;
+		       float* weight = blob[0]->mutable_cpu_data();
+		       float* bias = blob[1]->mutable_cpu_data();
+
+ 		       int countb = blob[1]->count();
+			   cout<<i<<"   "<<"countb = "<<countb<<endl;
+                  float *cent_data = lays[i]->centroids().mutable_cpu_data();
+                  int *indice_data = lays[i]->indices().mutable_cpu_data();
+
+
+                   cout << lays[i]->layer_param().name() << endl;
+                   cout << lays[i]->layer_param().type() << endl;  
+
+
+                   if (strcmp(lays[i]->layer_param().type().c_str(), "CmpConvolution") == 0){
+
+		               const  shared_ptr<Layer<float> > l = lays[i];
+                       const  shared_ptr<BaseConvolutionLayer<float> > bcl=  boost::dynamic_pointer_cast<BaseConvolutionLayer<float> >(l) ;
+
+                       int class_num = bcl->class_num();
+
+                       cout<<"class_num  "<<class_num<<"  ";
+
+
+
+			            for(int k=0;k<class_num;k++){
+                           
+					        
+					        fin.read((char*)(cent_data+k), sizeof(float));
+                            read_bytes+=sizeof(float);
+                            //cout<<cent_data[k]<<"   ";
+				        }
+   
+ 
+                   }
+
+                  if (strcmp(lays[i]->layer_param().type().c_str(), "CmpInnerProduct") == 0){
+
+		               const  shared_ptr<Layer<float> > l = lays[i];
+                       const  shared_ptr<CmpInnerProductLayer<float> > bcl=  boost::dynamic_pointer_cast<CmpInnerProductLayer<float> >(l) ;
+
+                       int class_num = bcl->class_num();
+
+                       cout<<"class_num  "<<class_num<<"  ";
+
+
+
+			            for(int k=0;k<class_num;k++){
+                           
+					        
+					        fin.read((char*)(cent_data+k), sizeof(float));
+                            //cout<<cent_data[k]<<"   ";
+                            read_bytes+=sizeof(float);                
+				        }
+   
+ 
+                   }
+
+
+
+            int count_one=0;
+            fin.read((char*)(&count_one), sizeof(int));	
+            read_bytes+=sizeof(int);
+
+          cout<<endl<<"--------------------------------count_one    "<<count_one<<"---------------------------------------"<<endl;
+
+
+          for (int i = 0; i < count; ++i)
+		  {
+
+		      mask_data[i]=0;
+              weight[i]=0;
+
+		  }
+                   
+
+		  for (int i = 0; i < count_one; ++i)
+		  {
+
+		        //sort_weight[i] = fabs(weight[i]);
+		        //cout<<weight[i]<<"  ";
+		        //cout<<mask_data[i]<<"  ";
+		        //cout<<indice_data[i]<<"  ";
+                //unsigned char indice=(unsigned char)(indice_data[i]);
+                //printf("%u  ",indice);
+
+                int index;
+                unsigned char indice;
+
+                fin.read((char*)(&index), sizeof(int));
+                fin.read((char*)(&indice), sizeof(char));
+                read_bytes+=sizeof(int)+sizeof(char);	
+
+                mask_data[index] =1;
+                indice_data[index] = (int)indice; 
+
+
+                 if(i<100)
+                    cout<<"["<<index<<",  "<<+indice<<"]   ";
+
+                //cout<<"-----index  "<<index<<endl; 
+                //printf("-----indice    %u\n", indice);
+                //cout<<"-----cent_data[indice]  "<<cent_data[indice]<<endl; 
+
+                weight[index] = cent_data[indice];
+
+		  }
+
+
+
+          for (int i = 0; i < count; ++i)
+		  {
+
+		        //sort_weight[i] = fabs(weight[i]);
+		        //cout<<weight[i]<<"  ";
+		        //cout<<mask_data[i]<<"  ";
+		        //cout<<indice_data<<"  ";
+                //unsigned char indice=(unsigned char)(indice_data[i]);
+                //printf("%u  ",indice);
+
+		  }
+
+
+    
+
+
+
+
+
+
+	  	  for (int i = 0; i < countb; ++i)
+		  {
+		     //sort_weight[i] = fabs(weight[i]);
+		     //cout<<weight[i]<<"  ";
+			 //cout<<bias[i]<<"  ";
+		     //cout<<mask_data[i]<<"  ";
+		     //cout<<indice_data<<"  ";
+              fin.read((char*)(bias+i), sizeof(float));	
+              read_bytes+=sizeof(float);  
+
+		  }
+  
+          const float* weight1 = blob[0]->cpu_data();
+
+          for (int j = 0; j < count; ++j)
+		  {
+            
+		    //cout<<indice_data[j]<<"  ";
+            //printf("%cu  ",indice_data[j]);
+
+            //cout<<"["<<weight1[j]<<",  "<<weight[j]<<"]   ";
+
+            if(j==100)break;
+
+		  }
+
+
+
+
+         }
+
+
+
+
+     }
+
+
+    fin.close();
+
+    cout<<endl<<"-----------------read_bytes   "<<read_bytes<<"----------------------------"<<endl;
+
+
+  
+
+
+  LOG(INFO) << "Running for " << FLAGS_iterations << " iterations.";
+
+  vector<int> test_score_output_id;
+  vector<float> test_score;
+  float loss = 0;
+  for (int i = 0; i < FLAGS_iterations; ++i) {
+    float iter_loss;
+    const vector<Blob<float>*>& result =
+        caffe_net.Forward(&iter_loss);
+    loss += iter_loss;
+    int idx = 0;
+    for (int j = 0; j < result.size(); ++j) {
+      const float* result_vec = result[j]->cpu_data();
+      for (int k = 0; k < result[j]->count(); ++k, ++idx) {
+        const float score = result_vec[k];
+        cout<<"jk=  "<<j<<"   "<<k<<"   "<<score<<endl;
+        if (i == 0) {
+          test_score.push_back(score);
+          test_score_output_id.push_back(j);
+        } else {
+          test_score[idx] += score;
+        }
+        const std::string& output_name = caffe_net.blob_names()[
+            caffe_net.output_blob_indices()[j]];
+        LOG(INFO) << "Batch " << i << ", " << output_name << " = " << score;
+      }
+    }
+  }
+  loss /= FLAGS_iterations;
+  LOG(INFO) << "Loss: " << loss;
+  cout<<endl<<"test_score.size()  "<<test_score.size()<<endl;
+  for (int i = 0; i < test_score.size(); ++i) {
+    const std::string& output_name = caffe_net.blob_names()[
+        caffe_net.output_blob_indices()[test_score_output_id[i]]];
+    const float loss_weight = caffe_net.blob_loss_weights()[
+        caffe_net.output_blob_indices()[test_score_output_id[i]]];
+    std::ostringstream loss_msg_stream;
+    const float mean_score = test_score[i] / FLAGS_iterations;
+    if (loss_weight) {
+      loss_msg_stream << " (* " << loss_weight
+                      << " = " << loss_weight * mean_score << " loss)";
+    }
+    LOG(INFO) << output_name << " = " << mean_score << loss_msg_stream.str();
+  }
+
+
+
+
+
+
+}
+RegisterBrewFunction(decmp);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 // Time: benchmark the execution time of a model.

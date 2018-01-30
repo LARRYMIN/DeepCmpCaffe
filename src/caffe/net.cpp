@@ -740,6 +740,7 @@ void Net<Dtype>::Reshape() {
 template <typename Dtype>
 void Net<Dtype>::CopyTrainedLayersFrom(const NetParameter& param) {
   int num_source_layers = param.layer_size();
+   cout<<"num_source_layers    "<<num_source_layers<<endl;
   for (int i = 0; i < num_source_layers; ++i) {
     const LayerParameter& source_layer = param.layer(i);
     const string& source_layer_name = source_layer.name();
@@ -772,6 +773,9 @@ void Net<Dtype>::CopyTrainedLayersFrom(const NetParameter& param) {
       const bool kReshape = false;
       target_blobs[j]->FromProto(source_layer.blobs(j), kReshape);
     }
+    cout<<"source_layer_name   "<<source_layer_name<<endl;
+    cout<<"ComputeBlobMask   target_layer_id    "<<target_layer_id<<endl;
+
     layers_[target_layer_id]->ComputeBlobMask();
   }
 }
